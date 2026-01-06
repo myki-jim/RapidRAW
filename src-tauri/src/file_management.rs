@@ -2485,3 +2485,127 @@ pub fn create_virtual_copy(source_virtual_path: String) -> Result<String, String
 
     Ok(new_virtual_path)
 }
+
+/// Check if a file or directory exists
+#[tauri::command]
+pub fn exists(path: String) -> bool {
+    Path::new(&path).exists()
+}
+
+/// Start watching a folder for new image files
+#[tauri::command]
+pub async fn start_folder_watcher(
+    folder: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    use notify::{Event, EventKind, RecursiveMode, Result as NotifyResult, Watcher};
+    use notify::RecommendedWatcher;
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    eprintln!("{} [FolderWatcher] Starting folder watcher for: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), folder);
+
+    let folder_path = PathBuf::from(&folder);
+    if !folder_path.exists() {
+        eprintln!("{} [FolderWatcher] ERROR: Folder does not exist: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), folder);
+        return Err("Folder does not exist".to_string());
+    }
+
+    // Channel for sending file paths from watcher thread to async task
+    let (tx, rx) = mpsc::channel::<String>();
+    let app_clone = app.clone();
+
+    // Spawn async task to receive file events and emit them
+    tokio::spawn(async move {
+        eprintln!("{} [FolderWatcher] Event receiver task started", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+        while let Ok(path) = rx.recv() {
+            // Small delay to ensure file is fully written
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            eprintln!("{} [FolderWatcher] File added - {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), path);
+            let _ = app_clone.emit("folder:file_added", path);
+        }
+        eprintln!("{} [FolderWatcher] Event receiver task ended", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+    });
+
+    // Spawn watcher thread (blocking)
+    let folder_clone = folder.clone();
+    let tx_clone = tx;
+    thread::spawn(move || {
+        eprintln!("{} [FolderWatcher] Watcher thread started for: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), folder_clone);
+
+        // Track recently seen files to avoid duplicate events (Create + Modify for same file)
+        use std::sync::Mutex;
+        use std::collections::HashSet;
+        let seen_files = Arc::new(Mutex::new(HashSet::new()));
+        let seen_files_clone = seen_files.clone();
+
+        // Spawn cleanup thread to remove old entries from seen_files
+        let seen_files_cleanup = seen_files_clone.clone();
+        thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                let mut seen = seen_files_cleanup.lock().unwrap();
+                seen.clear();
+            }
+        });
+
+        // Create watcher in blocking context
+        let mut watcher = RecommendedWatcher::new(
+            move |res: NotifyResult<Event>| {
+                match res {
+                    Ok(event) => {
+                        // Only listen to Create events, not Modify (which causes duplicates)
+                        if matches!(event.kind, EventKind::Create(_)) {
+                            if let Some(path) = event.paths.first() {
+                                let path_str = path.to_string_lossy().to_string();
+                                if let Some(ext) = path.extension() {
+                                    let ext_str = ext.to_string_lossy().to_lowercase();
+                                    if matches!(ext_str.as_str(),
+                                        "jpg" | "jpeg" | "png" | "cr3" | "cr2" | "nef" |
+                                        "arw" | "dng" | "raf" | "orf" | "pef" | "rw2" | "srw" |
+                                        "crw" | "tif" | "tiff" | "heic" | "avif"
+                                    ) {
+                                        // Check if we've already seen this file
+                                        let mut seen = seen_files.lock().unwrap();
+                                        if !seen.contains(&path_str) {
+                                            seen.insert(path_str.clone());
+                                            let _ = tx_clone.send(path_str);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{} [FolderWatcher] Watch error: {:?}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), e);
+                    }
+                }
+            },
+            notify::Config::default(),
+        ).unwrap();
+
+        if let Err(e) = watcher.watch(&folder_path, RecursiveMode::Recursive) {
+            eprintln!("{} [FolderWatcher] ERROR: Failed to watch folder: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), e);
+        } else {
+            eprintln!("{} [FolderWatcher] Successfully watching folder: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), folder_clone);
+        }
+
+        // Keep the watcher alive - the thread needs to stay running
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+        }
+    });
+
+    eprintln!("{} [FolderWatcher] Folder watcher command completed successfully", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+    Ok(())
+}
+
+/// Stop watching a folder
+#[tauri::command]
+pub async fn stop_folder_watcher(folder: String) {
+    eprintln!("stop_folder_watcher called for: {}", folder);
+    // Note: In this simple implementation, watchers run indefinitely
+    // For production, you'd want to track and stop specific watchers
+}

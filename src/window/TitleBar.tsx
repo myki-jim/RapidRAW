@@ -1,10 +1,16 @@
 import { useCallback, useState, useEffect } from 'react';
 import { platform } from '@tauri-apps/plugin-os';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { Minus, Square, X } from 'lucide-react';
+import { Minus, Square, X, Camera } from 'lucide-react';
+import { useCamera } from '../context/CameraContext';
 
-export default function TitleBar() {
+interface TitleBarProps {
+  onShowCameraPanel?: () => void;
+}
+
+export default function TitleBar({ onShowCameraPanel }: TitleBarProps) {
   const [osPlatform, setOsPlatform] = useState('');
+  const { isConnected: cameraConnected } = useCamera();
 
   useEffect(() => {
     const getPlatform = async () => {
@@ -72,6 +78,19 @@ export default function TitleBar() {
           <p className="text-sm font-semibold text-text-secondary">RapidRAW</p>
         </div>
       </div>
+
+      {/* Camera status indicator (clickable to show camera panel) */}
+      {cameraConnected && (
+        <button
+          onClick={onShowCameraPanel}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors bg-green-500/20 text-green-400 hover:bg-green-500/30"
+          data-tauri-drag-region
+        >
+          <Camera size={12} className="animate-pulse" />
+          <span>Connected</span>
+        </button>
+      )}
+
       <div className="flex items-center h-full">
         {isWindows && (
           <>

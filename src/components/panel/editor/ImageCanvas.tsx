@@ -498,6 +498,7 @@ const ImageCanvas = memo(
   }: ImageCanvasProps) => {
     const [isCropViewVisible, setIsCropViewVisible] = useState(false);
     const [layers, setLayers] = useState<Array<ImageLayer>>([]);
+    const [isImageLoaded, setIsImageLoaded] = useState(false);
     const cropImageRef = useRef<HTMLImageElement>(null);
     const imagePathRef = useRef<string | null>(null);
     const latestEditedUrlRef = useRef<string | null>(null);
@@ -580,7 +581,20 @@ const ImageCanvas = memo(
         imagePathRef.current = currentImagePath;
         latestEditedUrlRef.current = null;
         const initialUrl = thumbnailUrl || originalUrl;
-        setLayers(initialUrl ? [{ id: initialUrl, url: initialUrl, opacity: 1 }] : []);
+        setIsImageLoaded(false);
+        if (initialUrl) {
+          const img = new Image();
+          img.src = initialUrl;
+          img.onload = () => {
+            setLayers([{ id: initialUrl, url: initialUrl, opacity: 1 }]);
+            setIsImageLoaded(true);
+          };
+          img.onerror = () => {
+            setLayers([{ id: initialUrl, url: initialUrl, opacity: 1 }]);
+          };
+        } else {
+          setLayers([]);
+        }
         return;
       }
 
@@ -590,6 +604,7 @@ const ImageCanvas = memo(
         img.src = currentPreviewUrl;
         img.onload = () => {
           if (img.src === latestEditedUrlRef.current) {
+            setIsImageLoaded(true);
             setLayers((prev) => {
               if (prev.some((l) => l.id === img.src)) {
                 return prev;
@@ -1083,12 +1098,17 @@ const ImageCanvas = memo(
             )}
             style={{
               height: '100%',
-              opacity: isContentReady ? 1 : 0,
               position: 'relative',
               width: '100%',
             }}
           >
-            <div className="absolute inset-0 w-full h-full">
+            {/* Placeholder shown when image is loading */}
+            {!isImageLoaded && selectedImage?.path && (
+              <div className="absolute inset-0 flex items-center justify-center text-text-secondary">
+                <div className="w-12 h-12 border-3 border-text-secondary border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+            <div className="absolute inset-0 w-full h-full" style={{ opacity: isImageLoaded ? 1 : 0 }}>
               {layers.map((layer: ImageLayer) =>
                 layer.url ? (
                   <img

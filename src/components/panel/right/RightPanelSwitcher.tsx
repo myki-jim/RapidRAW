@@ -1,4 +1,4 @@
-import { SlidersHorizontal, Info, Scaling, BrainCircuit, Bookmark, Save, Layers } from 'lucide-react';
+import { SlidersHorizontal, Info, Scaling, BrainCircuit, Bookmark, Save, Layers, Camera } from 'lucide-react';
 import { Panel } from '../../ui/AppProperties';
 
 interface PanelOptions {
@@ -10,6 +10,7 @@ interface PanelOptions {
 interface RightPanelSwitcherProps {
   activePanel: Panel | null;
   onPanelSelect(id: Panel): void;
+  isCameraConnected?: boolean;
 }
 
 const panelOptions: Array<PanelOptions> = [
@@ -20,12 +21,15 @@ const panelOptions: Array<PanelOptions> = [
   { id: Panel.Presets, icon: Bookmark, title: 'Presets' },
   { id: Panel.Ai, icon: BrainCircuit, title: 'AI Tools' },
   { id: Panel.Export, icon: Save, title: 'Export' },
+  { id: Panel.Tethering, icon: Camera, title: 'Tethering' },
 ];
 
-export default function RightPanelSwitcher({ activePanel, onPanelSelect }: RightPanelSwitcherProps) {
+export default function RightPanelSwitcher({ activePanel, onPanelSelect, isCameraConnected = false }: RightPanelSwitcherProps) {
   return (
     <div className="flex flex-col p-1 gap-1 h-full">
-      {panelOptions.map(({ id, icon: Icon, title }) => (
+      {panelOptions
+        .filter(({ id }) => id !== Panel.Tethering || isCameraConnected)
+        .map(({ id, icon: Icon, title }) => (
         <button
           className={`p-2 rounded-md transition-colors duration-200 ${
             activePanel === id

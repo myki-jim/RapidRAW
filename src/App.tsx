@@ -52,7 +52,9 @@ import AIPanel from './components/panel/right/AIPanel';
 import ExportPanel from './components/panel/right/ExportPanel';
 import LibraryExportPanel from './components/panel/right/LibraryExportPanel';
 import MasksPanel from './components/panel/right/MasksPanel';
+import { CameraTetheringPanel } from './components/panel/CameraTetheringPanel';
 import BottomBar from './components/panel/BottomBar';
+import { useCamera, CameraProvider } from './context/CameraContext';
 import { ContextMenuProvider, useContextMenu } from './context/ContextMenuContext';
 import TaggingSubMenu from './context/TaggingSubMenu';
 import CreateFolderModal from './components/modals/CreateFolderModal';
@@ -239,7 +241,7 @@ function App() {
   const [pinnedFolderTrees, setPinnedFolderTrees] = useState<any[]>([]);
   const [imageList, setImageList] = useState<Array<ImageFile>>([]);
   const [imageRatings, setImageRatings] = useState<Record<string, number>>({});
-  const [sortCriteria, setSortCriteria] = useState<SortCriteria>({ key: 'name', order: SortDirection.Ascending });
+  const [sortCriteria, setSortCriteria] = useState<SortCriteria>({ key: 'date', order: SortDirection.Descening });
   const [filterCriteria, setFilterCriteria] = useState<FilterCriteria>({
     colors: [],
     rating: 0,
@@ -275,6 +277,7 @@ function App() {
     filmstrip: true,
   });
   const [isAdjusting, setIsAdjusting] = useState(false);
+  const { isConnected: isCameraConnected } = useCamera();
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isFullScreenLoading, setIsFullScreenLoading] = useState(false);
   const [fullScreenUrl, setFullScreenUrl] = useState<string | null>(null);
@@ -570,6 +573,27 @@ function App() {
       unlisten.then((f) => f());
     };
   }, []);
+
+  // Start camera monitoring on app startup
+  useEffect(() => {
+    const startCameraMonitoring = async () => {
+      try {
+        await invoke(Invokes.TetherStartMonitoring);
+        console.log('Camera monitoring started');
+      } catch (err) {
+        console.error('Failed to start camera monitoring:', err);
+      }
+    };
+    startCameraMonitoring();
+  }, []);
+
+  // Switch to Adjustments panel when camera disconnects while on Tethering panel
+  useEffect(() => {
+    if (!isCameraConnected && activeRightPanel === Panel.Tethering) {
+      setActiveRightPanel(Panel.Adjustments);
+      setRenderedRightPanel(Panel.Adjustments);
+    }
+  }, [isCameraConnected, activeRightPanel]);
 
   const updateSubMask = (subMaskId: string, updatedData: any) => {
     setAdjustments((prev: Adjustments) => ({
@@ -1409,6 +1433,18 @@ function App() {
         setCurrentFolderPath(path);
         setActiveView('library');
 
+        // Set camera download folder to current folder
+        if (path) {
+          invoke(Invokes.TetherSetDownloadFolder, { folder: path }).catch(err => {
+            console.error('Failed to set camera download folder:', err);
+          });
+
+          // Start folder watcher for automatic refresh
+          invoke(Invokes.StartFolderWatcher, { folder: path }).catch(err => {
+            console.error('Failed to start folder watcher:', err);
+          });
+        }
+
         if (isNewRoot) {
           setExpandedFolders(new Set([path]));
         } else if (path) {
@@ -1689,6 +1725,58 @@ function App() {
     },
     [selectedImage?.path, applyAdjustments, debouncedSave, thumbnails, resetAdjustmentsHistory],
   );
+
+  // Listen for camera capture events and auto-open RAW files
+  useEffect(() => {
+    const unlisten = listen('camera:captured', async (event: any) => {
+      const { filePath } = event.payload;
+      console.log('Camera captured:', filePath);
+
+      // Check if it's a RAW file
+      if (filePath && (filePath.endsWith('.cr3') || filePath.endsWith('.CR3') ||
+          filePath.endsWith('.cr2') || filePath.endsWith('.CR2') ||
+          filePath.endsWith('.nef') || filePath.endsWith('.NEF') ||
+          filePath.endsWith('.arw') || filePath.endsWith('.ARW') ||
+          filePath.endsWith('.dng') || filePath.endsWith('.DNG') ||
+          filePath.endsWith('.raf') || filePath.endsWith('.RAF'))) {
+        // Auto-open the RAW file
+        console.log('Auto-opening RAW file:', filePath);
+        handleImageSelect(filePath);
+      }
+    });
+    return () => {
+      unlisten.then(fn => fn());
+    };
+  }, [handleImageSelect]);
+
+  // Listen for folder file changes and auto-refresh
+  useEffect(() => {
+    console.log('[FolderWatcher] Setting up folder:file_added listener');
+    const unlisten = listen('folder:file_added', async (event: any) => {
+      const filePath: string = event.payload;
+      console.log('[FolderWatcher] File added event received:', filePath);
+
+      // Check if it's a RAW file and auto-open
+      if (filePath.endsWith('.cr3') || filePath.endsWith('.CR3') ||
+          filePath.endsWith('.cr2') || filePath.endsWith('.CR2') ||
+          filePath.endsWith('.nef') || filePath.endsWith('.NEF') ||
+          filePath.endsWith('.arw') || filePath.endsWith('.ARW') ||
+          filePath.endsWith('.dng') || filePath.endsWith('.DNG') ||
+          filePath.endsWith('.raf') || filePath.endsWith('.RAF')) {
+        console.log('[FolderWatcher] Auto-opening RAW file:', filePath);
+        handleImageSelect(filePath);
+      }
+
+      console.log('[FolderWatcher] Calling refreshImageList...');
+      // Refresh the image list
+      await refreshImageList();
+      console.log('[FolderWatcher] refreshImageList completed');
+    });
+    return () => {
+      console.log('[FolderWatcher] Cleaning up listener');
+      unlisten.then(fn => fn());
+    };
+  }, [handleImageSelect, refreshImageList]);
 
   const executeDelete = useCallback(
     async (pathsToDelete: Array<string>, options = { includeAssociated: false }) => {
@@ -3946,6 +4034,12 @@ function App() {
                           setExportState={setExportState}
                         />
                       )}
+                      {renderedRightPanel === Panel.Tethering && (
+                        <CameraTetheringPanel
+                          currentFolder={currentFolderPath}
+                          refreshImageList={refreshImageList}
+                        />
+                      )}
                       {renderedRightPanel === Panel.Ai && (
                         <AIPanel
                           activePatchContainerId={activeAiPatchContainerId}
@@ -3979,7 +4073,7 @@ function App() {
                 activeRightPanel ? 'border-surface' : 'border-transparent',
               )}
             >
-              <RightPanelSwitcher activePanel={activeRightPanel} onPanelSelect={handleRightPanelSelect} />
+              <RightPanelSwitcher activePanel={activeRightPanel} onPanelSelect={handleRightPanelSelect} isCameraConnected={isCameraConnected} />
             </div>
           </div>
         </div>
@@ -4073,11 +4167,18 @@ function App() {
   return (
     <div
       className={clsx(
-        'flex flex-col h-screen bg-bg-primary font-sans text-text-primary overflow-hidden select-none',
-        (appSettings?.adaptiveEditorTheme || isAnimatingTheme) && 'enable-color-transitions',
-      )}
-    >
-      {appSettings?.decorations || (!isWindowFullScreen && <TitleBar />)}
+      'flex flex-col h-screen bg-bg-primary font-sans text-text-primary overflow-hidden select-none',
+      (appSettings?.adaptiveEditorTheme || isAnimatingTheme) && 'enable-color-transitions',
+    )}
+  >
+      {appSettings?.decorations || (!isWindowFullScreen && (
+        <TitleBar
+          onShowCameraPanel={() => {
+            setRenderedRightPanel(Panel.Tethering);
+            setActiveRightPanel(Panel.Tethering);
+          }}
+        />
+      ))}
       <div
         className={clsx('flex-1 flex flex-col min-h-0', [
           rootPath && 'p-2 gap-2',
@@ -4232,14 +4333,16 @@ function App() {
         sourceImages={collageModalState.sourceImages}
         thumbnails={thumbnails}
       />
-    </div>
+      </div>
   );
 }
 
 const AppWrapper = () => (
   <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
     <ContextMenuProvider>
-      <App />
+      <CameraProvider>
+        <App />
+      </CameraProvider>
     </ContextMenuProvider>
   </ClerkProvider>
 );

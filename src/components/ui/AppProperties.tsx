@@ -77,6 +77,18 @@ export enum Invokes {
   GenerateAllCommunityPreviews = 'generate_all_community_previews',
   SaveCommunityPreset = 'save_community_preset',
   SaveTempFile = 'save_temp_file',
+  // Camera tethering commands
+  TetherConnect = 'tether_connect',
+  TetherDisconnect = 'tether_disconnect',
+  TetherGetParams = 'tether_get_params',
+  TetherCapture = 'tether_capture',
+  TetherStartMonitoring = 'tether_start_monitoring',
+  TetherSetDownloadFolder = 'tether_set_download_folder',
+  TetherGetConfigChoices = 'tether_get_config_choices',
+  TetherSetConfigValue = 'tether_set_config_value',
+  // Folder watching commands
+  StartFolderWatcher = 'start_folder_watcher',
+  StopFolderWatcher = 'stop_folder_watcher',
 }
 
 export enum Panel {
@@ -87,6 +99,7 @@ export enum Panel {
   Masks = 'masks',
   Metadata = 'metadata',
   Presets = 'presets',
+  Tethering = 'tethering',
 }
 
 export enum RawStatus {

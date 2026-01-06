@@ -22,6 +22,7 @@ mod preset_converter;
 mod raw_processing;
 mod tagging;
 mod tagging_utils;
+mod tethering;
 
 use log;
 use std::collections::{HashMap, hash_map::DefaultHasher};
@@ -3050,6 +3051,11 @@ fn main() {
             initial_file_path: Mutex::new(None),
             thumbnail_cancellation_token: Arc::new(AtomicBool::new(false)),
         })
+        .manage(tethering::CameraService::new(
+            // Use Downloads directory as default capture location to avoid hot-reload issues
+            std::path::PathBuf::from(format!("{}/Downloads/RapidRAW_Captures",
+                std::env::var("HOME").unwrap_or_else(|_| ".".to_string())))
+        ))
         .invoke_handler(tauri::generate_handler![
             load_image,
             apply_adjustments,
@@ -3123,12 +3129,23 @@ fn main() {
             file_management::set_color_label_for_paths,
             file_management::import_files,
             file_management::create_virtual_copy,
+            file_management::exists,
+            file_management::start_folder_watcher,
+            file_management::stop_folder_watcher,
             tagging::start_background_indexing,
             tagging::clear_ai_tags,
             tagging::clear_all_tags,
             tagging::add_tag_for_paths,
             tagging::remove_tag_for_paths,
             culling::cull_images,
+            tethering::tether_connect,
+            tethering::tether_disconnect,
+            tethering::tether_get_params,
+            tethering::tether_capture,
+            tethering::tether_start_monitoring,
+            tethering::tether_set_download_folder,
+            tethering::tether_get_config_choices,
+            tethering::tether_set_config_value,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
